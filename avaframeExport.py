@@ -2,7 +2,7 @@ import amaConnector
 import os
 from os import path
 import geopandas, pandas as pd
-import gdal
+from osgeo import gdal
 from shapely import wkb
 from datetime import datetime
 def checkDir(dir):
@@ -24,12 +24,13 @@ def checkPath(filePath):
             outPath=''
 
     return outPath
-def grabRaster(config, outdir, design_event=False, constraint=''):
+def grabRaster(config, outdir, design_event=False, projstr ='', constraint=''):
     if (design_event):
         schema = 'design' # Design refers to reference avalanches meant for designing mitigation measures etc.
     else:
         schema = 'public' # Public refers to actual, real-life avalanches
-    projstr = amaConnect.query("select * from getclosestconf('%s','projection_raster')"%config)['getclosestconf'][0]
+    if projstr == '':
+        projstr = amaConnect.query("select * from getclosestconf('%s','projection_raster')"%config)['getclosestconf'][0]
     #getting the output projection config as stored in the config table
 
     epsg = int(projstr.lower().replace('epsg:','').strip())
@@ -69,12 +70,13 @@ def grabRaster(config, outdir, design_event=False, constraint=''):
     return len(pathList)
 
 
-def grabEvents(config, outpath,design_event=False, constraint = '' ):
+def grabEvents(config, outpath,design_event=False, projstr = 'epsg:31287', constraint = '' ):
     if (design_event):
         schema = 'design' # Design refers to reference avalanches meant for designing mitigation measures etc.
     else:
         schema = 'public' # Public refers to actual, real-life avalanches
-    projstr = amaConnect.query("select * from getclosestconf('%s','projection_raster')" % config)['getclosestconf'][0]
+    if projstr == '':
+        projstr = amaConnect.query("select * from getclosestconf('%s','projection_raster')" % config)['getclosestconf'][0]
     # getting the output projection config as stored in the config table
 
     epsg = int(projstr.lower().replace('epsg:', '').strip())
@@ -84,6 +86,7 @@ def grabEvents(config, outpath,design_event=False, constraint = '' ):
 
 
     geometryCols = amaConnect.query("select * from getclosestconf('%s','exportgeometry')"%config)
+    #geometryCols = {'getclosestconf': ['geom_event_pt, geom_path_ln, geom_event_ln, geom_rel_pt, geom_rel_ln']}
     #this asks the database for the stored geometry column names which should get exported in the current configuration
 
     for index, event in eventList.iterrows():
@@ -132,13 +135,13 @@ exportdate = datetime.now().strftime('export_%Y-%m-%d_%H-%M-%S')
 if not os.path.isdir(outdir):
     outdir = path.join(os.path.dirname(os.getcwd()),exportdate)
     print('Using output directory %s'%outdir)
-    os.mkdir(outdir)
+    os.makedirs(outdir, exist_ok=True)
 
 
 #fill in configurations if necessary:
 configuration = 'avaframe' # this refers to the configuration variables, as set in the DB table "ext_project" ("External Project configuration" in QGIS)
 useDesignEvents = False #set to True if you want to export Design Events instead of real recorded Events
-constraint = "where not(st_isempty(geom_rel_event_ln) or st_isempty(geom_event_ln))" #this constraint delivers all avalanches that have filled out release event line and event deposition line geometries.
+constraint = "" #this constraint delivers all avalanches that have filled out release event line and event deposition line geometries.
 
 
 
@@ -156,8 +159,9 @@ try:
 except:
     print ("ERROR --------- no writing access to directory '%s'!"%outdir)
 #initAma(outpath, accessFile, ':')
-eventsRes= grabEvents(configuration,outdir, useDesignEvents,constraint)
-rasterRes= grabRaster(configuration,outdir, useDesignEvents,constraint)
+projstr='' #possible override, use format 'epsg:4326'
+eventsRes= grabEvents(configuration,outdir, useDesignEvents, projstr, constraint)
+rasterRes= grabRaster(configuration,outdir, useDesignEvents,projstr, constraint)
 try:
     with open(path.join(outdir,'log.txt'),'a') as file:
         file.write('====Results====\n')
