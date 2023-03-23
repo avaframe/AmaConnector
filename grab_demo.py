@@ -1,30 +1,47 @@
-import os, amaConnector
-import pickle
-import os
-import pickle
-import math
-import numpy as np
-import shapely
-from shapely import wkb, wkt
-global amaConnect
-def grabAllComplete(outdir = os.path.join(os.getcwd(),'avalanches'), accessfile=os.path.join(os.getcwd(),'access.txt')):
-    #if no accessfile param is set, it will assume a csv-file (including header, seperator: ';') access.txt inside the outdir with the following parameters: host, port, database, username, password
-    os.makedirs(outdir,exist_ok=True)
-    if not os.path.isfile(accessfile):
-        accessfile = os.path.join(outdir, 'access.txt')
+""" functions to fetch data """
+
+import logging
+import pathlib
+
+# local imports
+import AmaUtilities as aU
+import amaConnector
+
+# create local logger
+log = logging.getLogger(__name__)
+
+
+def grabAllComplete(outDir, queryString="select * from event_full", accessfile=pathlib.Path('access.txt')):
+    """ fetch all event entries of the DB and return a dataFrame with all info for each event
+
+        Parameters
+        -----------
+        outDir: pathlib path or str
+            path where data shall be exported to
+        queryString: str
+            command to perform query - which entries of the DB shall be fetched
+            default is select all entries from available events
+        accessfile: pathlib path
+            optional - path to access file needed to access database
+            a csv-file (including header, seperator: ';') with the following parameters: host, port,
+            database, username, password
+
+        Returns
+        --------
+        dbData: pandas DF
+            DF with one row per found event including all available info on event
+    """
+
+    # check if accessfile is available
+    if not accessfile.is_file():
+        message = 'Access file is not a file, check path: %s' % (str(accessfile))
+        log.error(message)
+        raise FileNotFoundError(message)
+
+    # connect to DB
     amaConnect=amaConnector.amaAccess(accessfile)
-    # select all events that have a release point
-    data_dump = amaConnect.query("select * from event_full")
-    #where not st_isempty(geom_rel_event_pt)"
-    return data_dump
 
-def convert(wkt_text):  # converts wkt well known text into z, y, z points.
-    p = shapely.wkt.loads(wkt_text)
-    return p
+    # select all entries according to queryString
+    dbData = amaConnect.query(queryString)
 
-
-outdir = os.getcwd()
-accessfile = os.path.join(outdir, 'access.txt')
-data_dump = grabAllComplete(outdir=outdir, accessfile=accessfile)
-
-print(data_dump)
+    return dbData
