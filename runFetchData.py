@@ -3,9 +3,10 @@
 """
 
 import pathlib
+import pandas as pd
 import amaConnector
 import grab_demo as gD
-import AmaUtilities as aU
+import amaUtilities as aU
 from avaframe.in3Utils import cfgUtils
 from avaframe.in3Utils import logUtils
 import avaframe.in3Utils.fileHandlerUtils as fU

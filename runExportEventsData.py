@@ -5,7 +5,7 @@
 import pathlib
 import amaConnector
 import grab_demo as gD
-import AmaUtilities as aU
+import amaUtilities as aU
 import avaframeExport as aExport
 from avaframe.in3Utils import cfgUtils
 from avaframe.in3Utils import logUtils
