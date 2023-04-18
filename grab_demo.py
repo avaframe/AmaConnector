@@ -44,4 +44,11 @@ def grabAllComplete(outDir, queryString="select * from event_full", accessfile=p
     # select all entries according to queryString
     dbData = amaConnect.query(queryString)
 
+    # throw error if duplicated event id s exist
+    if any(dbData.duplicated(subset=['event_id'])):
+        dbDuplicated = dbData[dbData.duplicated(subset=['event_id'])]
+        message = 'Duplicated event_id in dataset - event_id: %s' % dbDuplicated['event_id'].to_list()
+        log.error(message)
+        raise ValueError(message)
+
     return dbData
