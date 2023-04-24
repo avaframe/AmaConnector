@@ -4,8 +4,9 @@ import pandas.io.sql as sqlio
 from shapely import wkt, wkb
 import geopandas
 import pandas
-import os
-import datetime
+import warnings
+warnings.filterwarnings('ignore') # setting ignore as a parameter
+
 class amaAccess:
     access = []
 
@@ -82,7 +83,6 @@ class amaAccess:
                 conn = psycopg2.connect(connstr
                     )
                 sql = '{} {};'.format(query_list.strip(), constraint.strip())
-
 
                 dat = sqlio.read_sql_query(sql, conn)
                 conn = None
