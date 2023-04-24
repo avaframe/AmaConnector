@@ -2,7 +2,6 @@ from shapely import wkb, LineString, Point, length
 from shapely.ops import split
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import geopandas
 import avaframe.in3Utils.geoTrans as gT
 

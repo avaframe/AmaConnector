@@ -4,7 +4,6 @@ import logging
 import pathlib
 
 # local imports
-import amaUtilities as aU
 import amaConnector
 
 # create local logger
