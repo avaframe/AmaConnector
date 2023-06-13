@@ -108,7 +108,10 @@ def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
     distancePath = []
     distanceEvent = []
     for index, row in dbData.iterrows():
+        # first split the line using point1 and use second line segment (from point1 onwards)
         line1 = split(row[line], row[point1]).geoms[1]
+        # the split this line segment using point2 and use first line segment
+        # resulting line2 is the line segment between point1 and point2
         line2 = split(line1, row[point2]).geoms[0]
         dbData.loc[index, '%s_Distance' % name] = length(line2)
         dbData.loc[index, '%s_Line' % name] = line2
