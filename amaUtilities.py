@@ -111,7 +111,7 @@ def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
         # first split the line using point1 and use second line segment (from point1 onwards)
         line1 = split(row[line], row[point1])
         # check if point1 is located right at the start of the line - so when splitting line no effect
-        if len(line1.geoms) == 1 and line1.boundary.geoms[0] == point1:
+        if len(line1.geoms) == 1 and line1.boundary.geoms[0] == row[point1]:
             line1 = line1.geoms[0]
         else:
             # if point1 is located further down the line take the part of the line from the point1 onwards
