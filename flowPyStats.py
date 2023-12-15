@@ -6,32 +6,49 @@ Created on Tue Nov 28 11:07:08 2023
 """
 
 import pathlib
-import configparser
+#import configparser
 import numpy as np
-import amaConnector
+#import amaConnector
 import grab_demo as gD
 import amaUtilities as aU
 import geopandas as gpd
-import pandas as pd
+#import pandas as pd
 import rasterio
-from rasterio import mask
+#from rasterio import mask
 from rasterio import features
 from shapely.geometry import Point
 from shapely.ops import cascaded_union
-from shapely.geometry import Polygon
+#from shapely.geometry import Polygon
 from rasterio.features import shapes
 from shapely.geometry import shape
-from rasterio.features import geometry_mask
-from shapely.geometry import mapping
-from shapely.wkt import loads
-from pprint import pprint
-import matplotlib.pyplot as plt
+#from rasterio.features import geometry_mask
+#from shapely.geometry import mapping
+#from shapely.wkt import loads
+#from skimage import measure
+from shapely.geometry import LineString
+#from pprint import pprint
+#import matplotlib.pyplot as plt
+#from scipy.spatial.distance import cdist
 
 from avaframe.in3Utils import cfgUtils
 from avaframe.in3Utils import logUtils
 import avaframe.in3Utils.fileHandlerUtils as fU
 import avaframe.in3Utils.geoTrans as gT
 import avaframe.out3Plot.amaPlots as aP
+
+
+# extract and add elevation values from a dem to an linestring/ multiple vertices
+def extract_elevation(x,y):
+    row, col = demRaster.index(x,y)
+    elevation = demData[row,col]
+    return elevation
+
+def add_elevation(geometry):
+    x,y = geometry.xy
+    vertices = [(xi, yi, extract_elevation(xi, yi)) for xi, yi in zip(x, y) ]
+    elePolygon = LineString(vertices)
+    return elePolygon
+
 
 # +++++++++SETUP CONFIGURATION++++++++++++++++++++++++
 # log file name; leave empty to use default runLog.log
@@ -48,6 +65,7 @@ travel = cfgMain['MAIN']['travel']
 angle = cfgMain['MAIN']['angle']
 flux = cfgMain['MAIN']['flux']
 dem = cfgMain['MAIN']['dem']
+poE = cfgMain['MAIN']['PoE_raster']
 
 
 # load info on setup for analysis
@@ -76,14 +94,57 @@ log.info('Events found for path name:')
 for index, row in dbFiltered.iterrows():
     log.info('%s, event id: %s' % (row['path_name'], row['event_id']))
 
+#poEData = gpd.read_file(poE)
 
+
+# Open raster file with path of energy pixel
+with rasterio.open(poE) as poEData:
+    poERaster= poEData.read(1).astype('float32')
+    transformPoE= poEData.transform
+    
+# transform path pixel to linestring (using center of each pixel)
+rowID, colID = np.where(poERaster == 1)
+centerCoords = rasterio.transform.xy(transformPoE, rowID, colID)
+centerCoords = np.column_stack(centerCoords)
+
+#reorganising ids, starting linestring upper right corner, vectorize column wise
+orderedCoords = sorted(centerCoords, key=lambda x: (-x[0], x[1]))
+start = min(orderedCoords, key=lambda x: (-x[0], x[1]))
+
+startID = orderedCoords.index(start)
+
+# Traverse the pixels along the U shape starting from the identified point
+traversedCoords = orderedCoords[startID:] + orderedCoords[:startID]
+# create line
+line = LineString(traversedCoords)
+
+
+# Extent line by e.g. 100
+extensionLength = 100
+
+# Calculate the direction of the line
+dx = line.xy[0][-1] - line.xy[0][0]
+dy = line.xy[1][-1] - line.xy[1][0]
+length = (dx**2 + dy**2)**0.5
+
+# Calculate the extension points
+startExten = Point(line.xy[0][0] - extensionLength * dx / length, 
+                        line.xy[1][0] - extensionLength * dy / length)
+
+endExten = Point(line.xy[0][-1] + extensionLength * dx / length, 
+                      line.xy[1][-1] + extensionLength * dy / length)
+
+# Extend the line
+extendedLine = LineString([startExten.coords[0]] + list(line.coords) + [endExten.coords[0]])
+
+# as gdf for exporting
+line_gdf = gpd.GeoDataFrame({'event_id':913},index=[0], geometry=[extendedLine], crs = 'EPSG:31287')
+line_gdf.to_file(r'C:\Users\LawineNaturgefahren\MagdalenaTest\outputFP\lineTest\poe_test.gpkg', driver='GPKG')
 with rasterio.open(flux) as fluxRaster:
     fluxData= fluxRaster.read(1).astype('float32')
     fluxData[fluxData == -9999] = np.nan
     transformFlux= fluxRaster.transform
 
-#identifying release cells
-#maskFlux = fluxData == 1
 
 #identify avalanche
 maskFlux = fluxData !=0
@@ -91,7 +152,7 @@ polygons = list(shapes(fluxData, mask = maskFlux, transform=transformFlux))
 fluxPoly = gpd.GeoDataFrame(geometry=[shape(s) for s,v in polygons])
 
 #dissolving the neighbouring pixels to polygons, first one multpolygon, then splitting into single polygons. 
-#only pixels which are connected via a side are dissolved, cornering pixels stay seperat
+#only pixels which are connected via a side are dissolved, cornering pixels stay, solved by buffer
 #TODO resolve crs! even though assingning one, none is shown in qgis, has to be assigned manually there again
 fluxPoly['buffer'] = fluxPoly['geometry'].buffer(1)
 dissolvedGeom = cascaded_union(fluxPoly['buffer'])
@@ -107,6 +168,8 @@ joined['geom_fp_runout_pt3d_travel_epsg:31287'] = emptygeom
 joined['geom_fp_runout_pt3d_angle_epsg:31287'] = emptygeom
 joined.set_geometry('geom_simulatedPolygons')
 
+
+
 #dissolvedPoly.to_file(r'C:\Users\LawineNaturgefahren\MagdalenaTest\AmaConnector\data\amaExports\testPolyFlux.gpkg', driver='GPKG')
 
 for index, row in joined.iterrows():
@@ -115,39 +178,17 @@ for index, row in joined.iterrows():
     #Open rasterfiles from flowpy Calculation and Dem used as input for calculation
     with rasterio.open(travel) as travelRaster:
         travelData= travelRaster.read(1).astype('float32')
+        #create raster mask based on polygon extracted from simulation
         maskTravel = features.geometry_mask([geometry], out_shape=travelRaster.shape, transform=travelRaster.transform, invert = True)
         maskedTravel = np.where(maskTravel, travelData, np.nan)
         maskedTravel = np.ma.masked_invalid(maskedTravel)
         
-        #travelData[travelData == 0] = np.nan
         maxIndices = np.unravel_index(np.argmax(maskedTravel), maskedTravel.shape)
         maxValue = maskedTravel[maxIndices]
-        #minIndices = np.unravel_index(np.nanargmin(travelData), travelData.shape)
-        #minValue = travelData[minIndices]
         lon, lat = travelRaster.xy(maxIndices[0],maxIndices[1])
         runoutPtTravel = gpd.GeoDataFrame({'MaxLength': [maxValue]},  geometry=[Point(lon, lat)], crs=cfgMain['MAIN']['projstr'])
         
-        #runoutPtTravel['MinLength']
-    '''
-        geometry = dissolvedPoly.geometry.values[0]
-        transform = travelRaster.transform
-        out_shape = travelRaster.shape
-        maskTravel = features.geometry_mask([geometry], out_shape=out_shape, transform=transform)
-        maskedTravel = np.where(maskTravel, np.nan, travelData)
-    
-    
-    
         
-        maskTravel, _ = mask.mask(travelRaster, [geometry], invert=True, nodata=np.nan)
-        maskTravel=maskTravel[0]
-        print(np.nanmin(maskTravel))
-        maskedTravel = np.where(np.isnan(maskTravel), np.nan, travelData)
-        maskedTravel = maskedTravel[0]
-        
-        minIndices = np.unravel_index(np.nanargmin(maskedTravel), maskedTravel.shape)
-        minValue = maskedTravel[minIndices]
-    '''
-
     # Set values outside the polygon to NaN in the raster array
     #raster_array[mask] = np.nan
     #Open rasterfiles from flowpy Calculation and Dem used as input for calculation
@@ -158,19 +199,63 @@ for index, row in joined.iterrows():
         maskedAngle [maskedAngle == 0] =np.nan
         maskedAngle = np.ma.masked_invalid(maskedAngle)
         
-        
-        #angleData[angleData == 0] = np.nan
-        #minValue = np.nanmin(angleData)
         minIndices = np.unravel_index(np.nanargmin(maskedAngle), maskedAngle.shape)
         minValue = angleData[minIndices]
         lon, lat = angleRaster.xy(minIndices[0],minIndices[1])
         runoutPtAngle = gpd.GeoDataFrame({'MinAngle': [minValue]}, geometry=[Point(lon, lat)], crs=cfgMain['MAIN']['projstr'])
         
+        '''
+    with rasterio.open(poE) as poERaster:
+        poEData= poERaster.read(1).astype('float32')
+        maskPoE = features.geometry_mask([geometry], out_shape=angleRaster.shape, transform=angleRaster.transform, invert = True)
+        maskPoE = np.where(maskPoE, poEData, np.nan)
+        maskPoE [maskedAngle == 0] =np.nan
+        maskPoE = np.ma.masked_invalid(maskPoE)
+        
+        transformPoE= poERaster.transform
+            
+        # transform path pixel to linestring (using center of each pixel)
+        rowID, colID = np.where(poERaster == 1)
+        centerCoords = rasterio.transform.xy(transformPoE, rowID, colID)
+        centerCoords = np.column_stack(centerCoords)
+        
+        #reorganising ids, starting linestring upper right corner, vectorize column wise
+        orderedCoords = sorted(centerCoords, key=lambda x: (-x[0], x[1]))
+        start = min(orderedCoords, key=lambda x: (-x[0], x[1]))
+        
+        startID = orderedCoords.index(start)
+        
+        # Traverse the pixels along the U shape starting from the identified point
+        traversedCoords = orderedCoords[startID:] + orderedCoords[:startID]
+        # create line
+        line = LineString(traversedCoords)
+        
+        
+        # Extent line by e.g. 100
+        extensionLength = 100
+        
+        # Calculate the direction of the line
+        dx = line.xy[0][-1] - line.xy[0][0]
+        dy = line.xy[1][-1] - line.xy[1][0]
+        length = (dx**2 + dy**2)**0.5
+        
+        # Calculate the extension points
+        startExten = Point(line.xy[0][0] - extensionLength * dx / length, 
+                                line.xy[1][0] - extensionLength * dy / length)
+        
+        endExten = Point(line.xy[0][-1] + extensionLength * dx / length, 
+                              line.xy[1][-1] + extensionLength * dy / length)
+        
+        # Extend the line
+        extendedLine = LineString([startExten.coords[0]] + list(line.coords) + [endExten.coords[0]])
+                '''
+                
     with rasterio.open(dem) as demRaster:
         # Read the DEM data as a NumPy array
         demData = demRaster.read(1).astype('float32')
         demData[demData == 0] = np.nan
         
+        # add elevation value from dem to runoutpoint lowest angle
         for ind, point in runoutPtAngle.iterrows():
             lon, lat = point['geometry'].x, point['geometry'].y
             elevationValue = list(demRaster.sample([(lon,lat)]))
@@ -179,7 +264,8 @@ for index, row in joined.iterrows():
                 point3d = Point(lon,lat,elevationValue[0])
                 #runoutPtAngle.at[index, 'geom_fp_runout_pt3d_angle_epsg:31287']=point3d
                 joined.loc[index, 'geom_fp_runout_pt3d_angle_epsg:31287'] =point3d
-                
+        
+        # add elevation value from dem to runoutpoint longest distance
         for ind, point in runoutPtTravel.iterrows():
             lon, lat = point['geometry'].x, point['geometry'].y
             eleValue = list(demRaster.sample([(lon,lat)]))
@@ -188,26 +274,29 @@ for index, row in joined.iterrows():
                 point3d = Point(lon,lat,eleValue[0])
                 #runoutPtTravel.at[index, 'geom_fp_runout_pt3d_travel_epsg:31287']=point3d
                 joined.loc[index, 'geom_fp_runout_pt3d_travel_epsg:31287'] = point3d
-        
-'''   
-#TODO event_id single event at the moment hardcoded, maybe it can be extracted through the release point 
-runoutPtAngle['event_id'] = 913   
-runoutPtTravel['event_id'] = 913
 
-dbFiltered = pd.merge(dbFiltered, runoutPtTravel[['geom_fp_runout_pt3d_travel_epsg:31287','event_id']], on='event_id')
-dbFiltered = pd.merge(dbFiltered, runoutPtAngle[['geom_fp_runout_pt3d_angle_epsg:31287','event_id']], on='event_id')
-'''
+
+#add eleveation to each vertex --> Polygons with Z-Coordinate
+line_gdf['geom_poE_ln3d_epsg:31287_resampled'] = line_gdf['geometry'].apply(add_elevation)
+#extrecting the runoutpoint based on the lowest elevation of the vertex
+#dissolvedPoly['minEle'] = dissolvedPoly['geometry'].apply(find_lowest_elevation)
+
+
 dbFiltered = joined
-#dbFiltered['geom_fp_runout_pt3d_travel_epsg:31287'].crs = 'EPSG:31287'
-#dbFiltered['geom_fp_runout_pt3d_angle_epsg:31287'].crs = 'EPSG:31287'
+line_gdf.rename(columns={'geometry':'geom_poE'}, inplace=True)
+dbFiltered = dbFiltered.merge(line_gdf, on='event_id', how='inner')
+projstr = cfgMain['MAIN']['projstr']
+
 # snap release, runout, origin, transit, deposition points to resampled thalweg for all events found that match criteria
 dbFiltered = gT.snapPtsToLine(dbFiltered, cfgMain['MAIN']['projstr'], lineName='geom_path_ln3d',
     pointsList=['geom_rel_event_pt3d', 'geom_event_pt3d', 'geom_origin_pt3d',
         'geom_transit_pt3d', 'geom_runout_pt3d','geom_fp_runout_pt3d_travel', 'geom_fp_runout_pt3d_angle'])
 
+
+
 # compute distance along thalweg between rel- runout, orig-transit, orig-depo
 # here the snapped points are chosen also in terms of their elevation on the path line!
-projstr = cfgMain['MAIN']['projstr']
+
 dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, 'geom_rel_event_pt3d_%s_snapped' % projstr,
     'geom_event_pt3d_%s_snapped' % projstr, projstr, name='rel-runout')
 
@@ -222,10 +311,41 @@ dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projs
 
 dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, 'geom_origin_pt3d_%s_snapped' % projstr,
     'geom_runout_pt3d_%s_snapped' % projstr, projstr, name='orig-depo')
-
-
+'''
 # plot analysis of thalweg in xy and Sxy view
 aP.plotPathAngle(dbFiltered, cfgMain, 'rel-runout', 'orig-transit')
+
+'''
+
+
+dbFiltered = gT.snapPtsToLine(dbFiltered, cfgMain['MAIN']['projstr'], lineName='geom_poE_ln3d',
+    pointsList=['geom_rel_event_pt3d', 'geom_event_pt3d', 'geom_origin_pt3d',
+        'geom_transit_pt3d', 'geom_runout_pt3d','geom_fp_runout_pt3d_travel', 'geom_fp_runout_pt3d_angle'])
+# compute distance along thalweg between rel- runout, orig-transit, orig-depo
+# here the snapped points are chosen also in terms of their elevation on the path line!
+
+dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_poE_ln3d_%s_resampled' % projstr, 'geom_rel_event_pt3d_%s_snapped' % projstr,
+    'geom_event_pt3d_%s_snapped' % projstr, projstr, name='rel-runout-poE')
+
+dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_poE_ln3d_%s_resampled' % projstr, 'geom_rel_event_pt3d_%s_snapped' % projstr,
+    'geom_fp_runout_pt3d_angle_%s_snapped' % projstr, projstr, name='rel-fpAngleRunout-poE')
+
+dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_poE_ln3d_%s_resampled' % projstr, 'geom_rel_event_pt3d_%s_snapped' % projstr,
+    'geom_fp_runout_pt3d_travel_%s_snapped' % projstr, projstr, name='rel-fpTravelRunout-poE')
+
+dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_poE_ln3d_%s_resampled' % projstr, 'geom_origin_pt3d_%s_snapped' % projstr,
+    'geom_transit_pt3d_%s_snapped' % projstr, projstr, name='orig-transit-poE')
+
+dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_poE_ln3d_%s_resampled' % projstr, 'geom_origin_pt3d_%s_snapped' % projstr,
+    'geom_runout_pt3d_%s_snapped' % projstr, projstr, name='orig-depo-poE')
+
+
+
+
+
+# ACHTUNG: überschreibt plot von oben (line 312)
+# plot analysis of thalweg in xy and Sxy view
+aP.plotPathAngle(dbFiltered, cfgMain, 'rel-runout-poE', 'rel-runout', 'orig-transit')
 
 # plot histogram of angles for rel-runout travel length
 aP.plotHist(dbFiltered, 'rel-runout', cfgMain)
