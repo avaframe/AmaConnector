@@ -5,9 +5,12 @@ import geopandas, pandas as pd
 from osgeo import gdal
 from shapely import wkb
 from datetime import datetime
+import csv
+import numpy as np
 def checkDir(dir):
+    dir=dir.replace(' ','')
     if not os.path.isdir(dir):
-        os.mkdir(dir)
+        os.makedirs(dir, exist_ok=True)
     return dir
 
 def checkPath(filePath):
@@ -24,6 +27,7 @@ def checkPath(filePath):
             outPath=''
 
     return outPath
+
 def grabRaster(amaConnect, config, outdir, design_event=False, projstr ='', constraint=''):
     if (design_event):
         schema = 'design' # Design refers to reference avalanches meant for designing mitigation measures etc.
@@ -69,6 +73,50 @@ def grabRaster(amaConnect, config, outdir, design_event=False, projstr ='', cons
             print('skipping.')
     return len(pathList)
 
+def writeConfig(eng, configfile, configname):
+    #reads CSV file from path <configfile>, expects columns ['key', 'value'], using DB engine <eng>
+    #will enter the presented configuration value-pairs into DB table ext_project, using configuration <configname>
+    df = pd.read_csv(configfile, quoting=csv.QUOTE_ALL)
+    res = None
+    cols =  df.columns.tolist()
+    if 'key' in cols and 'value' in cols: #seems like the reading worked
+        df['conf_group'] = configname
+        df.rename({'key': 'conf_key', 'value': 'conf_textvalue'})
+    if not 'conf_numvalue' in cols:
+        df['conf_numvalue'] = np.nan
+    df['cfg_id'] = 'default'
+    if 'conf_key' in cols and 'conf_textvalue' in cols:
+        df['conf_textvalue']=df['conf_textvalue'].astype(str)
+        res = configEnter(eng,df, configname)
+
+    return res
+
+def configEnter(eng,df, configname):
+    #upserts configuration values from dataframe to ext_project table
+    qry = ''
+    schema = 'public'
+    table = 'ext_project'
+    valrep = {"'default'":"default", 'nan': 'NULL', "'NULL'": "NULL"}
+    for index, row in df.iterrows():
+            colstr = amaConnector.listToPGstr(df.columns.tolist())
+            valstr = amaConnector.listToPGstr(row.tolist(),r"'")
+            for key in valrep.keys():
+                valstr = valstr.replace(key, valrep[key])
+
+            qry += "INSERT INTO %s.%s %s VALUES %s ON CONFLICT (""conf_group"", ""conf_key"", ""conf_numvalue"") DO UPDATE SET conf_textvalue = excluded.conf_textvalue;\n" %(schema, table, colstr, valstr)
+    eng.insertquery(qry)
+    return getconfig(eng, configname)
+
+
+def getconfig(eng, configname):
+    return eng.query("with abc as (select getconfparents('%s') as configs) select conf_group, conf_key, conf_textvalue, conf_numvalue from ext_project, abc where conf_group = any(abc.configs)"%(configname))
+
+def saveConfig(eng, configfile, configname):
+    #writes CSV file to path <configfile> with columns ['key', 'value'], using DB engine <eng>
+    #will store the used configuration <configname> to disk for reference
+    configs = getconfig(eng, configname)
+    configs.to_csv(configfile, quoting=csv.QUOTE_ALL, index=False)
+    return configs
 
 def grabEvents(amaConnect, config, outpath,design_event=False, projstr = 'epsg:31287', constraint = '' ):
     if (design_event):
@@ -124,3 +172,53 @@ def grabEvents(amaConnect, config, outpath,design_event=False, projstr = 'epsg:3
             #exportfile(dataOut, geometry['struct'], outpath)
 
     return len(eventList)
+
+
+global amaConnect
+#outdir = ''
+outdir = r'c:\temp\my_export_dir'
+#if you want to, uncomment and set your own export dir above -this should point to an already created directory.
+#otherwise, the following function will create a valid, individual export directory based on the current time:
+exportdate = datetime.now().strftime('export_%Y-%m-%d_%H-%M-%S')
+if not os.path.isdir(outdir):
+    outdir = path.join(os.path.dirname(os.getcwd()),exportdate)
+    print('Using output directory %s'%outdir)
+    os.makedirs(outdir, exist_ok=True)
+
+
+#fill in configurations if necessary:
+configuration = 'avaframe' # this refers to the configuration variables, as set in the DB table "ext_project" ("External Project configuration" in QGIS)
+useDesignEvents = False #set to True if you want to export Design Events instead of real recorded Events
+constraint = "WHERE event_id = 582" #this constraint delivers only Event 582 (Gaiskogel Nordwest)
+
+
+
+accessFile = path.join(os.getcwd(),'fullaccess_ama.txt')
+conffile = path.join(os.getcwd(), 'config.ini')
+amaConnect = amaConnector.amaAccess(accessFile)
+
+
+conf = saveConfig(amaConnect, conffile, configuration)
+try:
+    with open(path.join(outdir,'log.txt'),'w') as file:
+        file.write('Time: %s\n'%exportdate)
+        file.write('Exporting db using export configuration "%s"\n'%configuration)
+        file.write('configuration saved to "%s"' % conffile)
+        file.write('Design Events: %s\n' %useDesignEvents)
+        file.write('Using constraint: "%s"\n'%constraint)
+
+except:
+    print ("ERROR --------- no writing access to directory '%s'!"%outdir)
+#initAma(outpath, accessFile, ':')
+projstr='' #possible override, use format 'epsg:4326'
+eventsRes= grabEvents(configuration,outdir, useDesignEvents, projstr, constraint)
+rasterRes= grabRaster(configuration,outdir, useDesignEvents,projstr, constraint)
+try:
+    with open(path.join(outdir,'log.txt'),'a') as file:
+        file.write('====Results====\n')
+        file.write('Written %d events"\n'%eventsRes)
+        file.write('Written %d path rasters\n'%rasterRes)
+
+
+except:
+    print ("ERROR --------- no writing access to directory '%s'!"%outdir)
