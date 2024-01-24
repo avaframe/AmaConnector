@@ -27,7 +27,8 @@ def checkPath(filePath):
             outPath=''
 
     return outPath
-def grabRaster(config, outdir, design_event=False, projstr ='', constraint=''):
+
+def grabRaster(amaConnect, config, outdir, design_event=False, projstr ='', constraint=''):
     if (design_event):
         schema = 'design' # Design refers to reference avalanches meant for designing mitigation measures etc.
     else:
@@ -117,11 +118,7 @@ def saveConfig(eng, configfile, configname):
     configs.to_csv(configfile, quoting=csv.QUOTE_ALL, index=False)
     return configs
 
-
-
-
-
-def grabEvents(config, outpath,design_event=False, projstr = 'epsg:31287', constraint = '' ):
+def grabEvents(amaConnect, config, outpath,design_event=False, projstr = 'epsg:31287', constraint = '' ):
     if (design_event):
         schema = 'design' # Design refers to reference avalanches meant for designing mitigation measures etc.
     else:
@@ -153,7 +150,8 @@ def grabEvents(config, outpath,design_event=False, projstr = 'epsg:31287', const
             if not (geometry['geom'].isnull()[0]): #only work with existing geometries
                 geometry['geom'] = geometry['geom'].apply(wkb.loads, hex=True)
 
-                attr = amaConnect.query("select * from %s.extractattributes(%d, '%s', '%s')" % (schema, event_id, col, config))
+                attr = amaConnect.query(
+                    "select * from %s.extractattributes(%d, '%s', '%s')" % (schema, event_id, col, config))
                 #this retrieves the selected set of attributes according to the current configuration and the current geometry column
                 # one may set different (or none at all) attributes to be included in paths, release lines etc.
                 attributes = pd.DataFrame([attr['value']]).rename(columns=attr['key']).reset_index(drop=True)
