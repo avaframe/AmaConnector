@@ -197,12 +197,6 @@ accessFile = path.join(os.getcwd(),'fullaccess_ama.txt')
 conffile = path.join(os.getcwd(), 'config.ini')
 amaConnect = amaConnector.amaAccess(accessFile)
 
-#writeConfig(amaConnect, conffile, 'tmpconf2' )
-
-
-
-
-#
 
 conf = saveConfig(amaConnect, conffile, configuration)
 try:
