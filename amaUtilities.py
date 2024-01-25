@@ -138,3 +138,21 @@ def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
     dbData['%s_LineDist' % name] = distanceEvent
 
     return dbData
+
+
+def findAngleInProfile(pointAngle, avaPath, profile, dsMin):
+
+    anglePara, tmpPara, dsPara = gT.prepareAngleProfile(pointAngle, profile, raiseWarning=False)
+
+    try:
+        indSplitPoint = gT.findAngleProfile(tmpPara, dsPara, dsMin)
+        pointFound = {'x': avaPath['x'][indSplitPoint], 'y': avaPath['y'][indSplitPoint],
+                      'z': avaPath['z'][indSplitPoint], 'zPara': profile['z'][indSplitPoint],
+                      's': profile['s'][indSplitPoint]}
+    except IndexError:
+        noSplitPointFoundMessage = ('Automated split point generation failed as no point where slope is less than %s°'
+                                    'was found, provide the split point manually.' % pointAngle)
+        pointFound = ''
+        #log.warning(noSplitPointFoundMessage)
+
+    return pointFound
