@@ -2,15 +2,27 @@
     Run script to fetch data of the database
 """
 
+
 import pathlib
 import configparser
 import numpy as np
+import os
+import pandas as pd
 import amaConnector
 import grab_demo as gD
 import amaUtilities as aU
+import thalwegPlotsMEDIAN as tPM
+import fit as fit
+import intensityAnalysis as iA
 import matplotlib.pyplot as plt
+from shapely.ops import split
 from shapely import get_coordinates
+from shapely.geometry import Point, LineString
 import matplotlib.patheffects as pe
+import seaborn as sns
+import math
+from sklearn.metrics import r2_score, mean_squared_error
+
 
 from avaframe.in3Utils import cfgUtils
 from avaframe.in3Utils import logUtils
@@ -18,8 +30,11 @@ import avaframe.in3Utils.fileHandlerUtils as fU
 import avaframe.in3Utils.geoTrans as gT
 import avaframe.out3Plot.amaPlots as aP
 import avaframe.in2Trans.ascUtils as IOf
-import avaframe.ana5Utils.DFAPathGeneration as DFAPath
+import DFAPathGeneration as DFAPath
+import avaframe.out3Plot.plotUtils as pU
 
+#use latex in str
+plt.rcParams["text.usetex"] = True
 # +++++++++SETUP CONFIGURATION++++++++++++++++++++++++
 # log file name; leave empty to use default runLog.log
 logName = 'runFetchDataAnalyse'
@@ -48,6 +63,8 @@ log.info('Fetched %d entries from data base ' % (len(dbData)))
 for index, row in dbData.iterrows():
     log.info('%s, event id: %s, index %s' % (row['path_name'], row['event_id'], index))
 
+
+
 # filter db according to nonEmptyCols and convert geometry entries to desired projection
 # resample thalweg for higher resolution
 dbFiltered = aU.fetchGeometryInfo(dbData, 'epsg:4326', cfgMain['MAIN']['projstr'],
@@ -58,16 +75,26 @@ log.info('Events found for path name:')
 for index, row in dbFiltered.iterrows():
     log.info('%s, event id: %s' % (row['path_name'], row['event_id']))
 
+#Import settings from .ini-File
+projstr = cfgMain['MAIN']['projstr']
+resDist = cfgMain['MAIN'].getfloat('resamplePathFit')
+dsMin = cfgMain['MAIN'].getfloat('dsMin')
+slope1 = cfgMain['MAIN'].getfloat('slopeAngle1')
+slope2 = cfgMain['MAIN'].getfloat('slopeAngle2')
+
+mask = dbFiltered.duplicated(subset='path_id', keep ='first')
+dbFiltered = dbFiltered[~mask]
+
+dbFiltered.dropna(subset=['geom_rel_event_pt3d_epsg:31287'], inplace=True)
+
+
 # snap release, runout, origin, transit, deposition points to resampled thalweg for all events found that match criteria
-dbFiltered = gT.snapPtsToLine(dbFiltered, cfgMain['MAIN']['projstr'], lineName='geom_path_ln3d',
-    pointsList=['geom_rel_event_pt3d', 'geom_event_pt3d', 'geom_origin_pt3d',
-        'geom_transit_pt3d', 'geom_runout_pt3d'])
+dbFiltered = gT.snapPtsToLine(dbFiltered, projstr, lineName='geom_path_ln3d',
+    pointsList=[ 'geom_event_pt3d', 'geom_origin_pt3d',
+        'geom_transit_pt3d', 'geom_runout_pt3d', 'geom_event_pt3d', 'geom_rel_event_pt3d'])
 
 # compute distance along thalweg between rel- runout, orig-transit, orig-depo
 # here the snapped points are chosen also in terms of their elevation on the path line!
-projstr = cfgMain['MAIN']['projstr']
-dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, 'geom_rel_event_pt3d_%s_snapped' % projstr,
-    'geom_event_pt3d_%s_snapped' % projstr, projstr, name='rel-runout')
 
 dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, 'geom_origin_pt3d_%s_snapped' % projstr,
     'geom_transit_pt3d_%s_snapped' % projstr, projstr, name='orig-transit')
@@ -75,98 +102,101 @@ dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projs
 dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, 'geom_origin_pt3d_%s_snapped' % projstr,
     'geom_runout_pt3d_%s_snapped' % projstr, projstr, name='orig-depo')
 
+dbFiltered = aU.addXYDistAngle(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, 'geom_origin_pt3d_%s_snapped' % projstr,
+                               'geom_event_pt3d_%s_snapped'% projstr, projstr, name='orig-runout')
 
-# test section to identify points along path line
-# just experimental code
-for index, row in dbFiltered.iterrows():
-
-    # fetch x, y, z coordinats of thalweg line
-    x = get_coordinates(row['geom_path_ln3d_epsg:31287_resampled'])[:,0]
-    y = get_coordinates(row['geom_path_ln3d_epsg:31287_resampled'])[:,1]
-
-    # fetch DEM
-    demPath = pathlib.Path('data', 'amaExports', row['path_name'], ('dem_path_%d.asc' % row['path_id']))
-    dem = IOf.readRaster(demPath)
-
-    # setup avaPath to get parabolic fit
-    avaPath = {'x': x, 'y': y}
-    # first resample path and make smoother - TODO check if required
-    avaPath, projPoint = gT.prepareLine(dem, avaPath, distance=cfgMain['MAIN'].getfloat('resamplePathFit'), Point=None)
-
-    # setup config for path generation - for now load from amaConnector main config - TODO use overrides
-    DFAPathCfg = cfgMain['PATH']
-    # make the parabolic fit
-    parabolicFit = DFAPath.getParabolicFit(DFAPathCfg, avaPath, dem)
-    # get parabola - use entire path line as base
-    sPara = avaPath['s']
-    zPara = parabolicFit['a']*sPara*sPara+parabolicFit['b']*sPara+parabolicFit['c']
-    # setup parabolicFit dict
-    parabolicProfile = {'s': sPara, 'z': zPara}
-
-    # fetch points along thalweg where angle falls below pointAngle
-    transitPoint = aU.findAngleInProfile(cfgMain['MAIN'].getfloat('transitPointAngle'), avaPath,
-                                       parabolicProfile, cfgMain['MAIN'].getfloat('dsMin'))
-
-    depoPoint = aU.findAngleInProfile(cfgMain['MAIN'].getfloat('depositionPointAngle'), avaPath,
-                                         parabolicProfile, cfgMain['MAIN'].getfloat('dsMin'))
+dbFiltered = aU.addGradientForPoint(dbFiltered, 'geom_path_ln3d_%s_resampled' % projstr, ['geom_origin_pt3d_%s_snapped' % projstr, 
+                                                                                          'geom_transit_pt3d_%s_snapped' % projstr,
+                                                                                          'geom_runout_pt3d_%s_snapped' % projstr])
 
 
-    # Do a quadtratic fit
-    zQuad = np.polyfit(avaPath['s'], avaPath['z'], 2)
-    poly = np.poly1d(zQuad)
-    fitProfile = {'s': avaPath['s'], 'z': poly(avaPath['s'])}
-
-    transitPoint2 = aU.findAngleInProfile(cfgMain['MAIN'].getfloat('transitPointAngle'), avaPath,
-                                          fitProfile, cfgMain['MAIN'].getfloat('dsMin'))
-    depoPoint2 = aU.findAngleInProfile(cfgMain['MAIN'].getfloat('depositionPointAngle'), avaPath,
-                                       fitProfile, cfgMain['MAIN'].getfloat('dsMin'))
-
-    # debug figure
-    plt.figure()
-    plt.title('%s' % row['path_name'])
-    plt.plot(avaPath['s'], avaPath['z'], '-y.', label='thalweg',
-                 lw=1, path_effects=[pe.Stroke(linewidth=3, foreground='b'), pe.Normal()])
-
-    if transitPoint != '':
-        plt.axvline(x=transitPoint['s'], color='lightgrey', linewidth=1, linestyle='-.',
-                    label='Transit point %s°' % cfgMain['MAIN']['transitPointAngle'])
-        plt.axhline(y=transitPoint['z'], color='lightgrey', linewidth=1, linestyle='-.')
-    if depoPoint != '':
-        plt.axvline(x=depoPoint['s'], color='grey', linewidth=1, linestyle='-.',
-                    label='Deposition point %s°' % cfgMain['MAIN']['depositionPointAngle'])
-        plt.axhline(y=depoPoint['z'], color='grey', linewidth=1, linestyle='-.')
-
-    if transitPoint2 != '':
-        plt.axvline(x=transitPoint2['s'], color='orange', linewidth=1, linestyle=(0, (5, 10)),
-                    label='Transit point fit %s°' % cfgMain['MAIN']['transitPointAngle'])
-        plt.axhline(y=transitPoint2['z'], color='orange', linewidth=1, linestyle=(0, (5, 10)))
-    if depoPoint2 != '':
-        plt.axvline(x=depoPoint2['s'], color='moccasin', linewidth=1, linestyle=(0, (5, 10)),
-                    label='Deposition point fit %s°' % cfgMain['MAIN']['depositionPointAngle'])
-        plt.axhline(y=depoPoint2['z'], color='moccasin', linewidth=1, linestyle=(0, (5, 10)))
-    plt.plot(fitProfile['s'], fitProfile['z'], color='orange', linestyle=':', label='QuadFit')
-
-    plt.xlabel('along thalweg [m]')
-    plt.ylabel('elevation [m]')
-    plt.plot(sPara, zPara, '-k', label='Parabolic fit')
-    plt.legend()
-    plt.show()
+#Calculating intensity characteristics
+dbFiltered = iA.intensityCharacteristics(dbFiltered, resDist)
+#Applying fit method
+dbFiltered = fit.fitThalweg( dbFiltered, slope1, slope2, resDist, projstr, dsMin)
 
 
-#++++++++++++++create plots and save dataframe to file
-outFile = avalancheDir / 'data.csv'
-dbFiltered.to_csv(outFile)
 
-# plot analysis of thalweg in xy and Sxy view
-aP.plotPathAngle(dbFiltered, cfgMain, 'rel-runout', 'orig-transit')
 
-# plot histogram of angles for rel-runout travel length
-aP.plotHist(dbFiltered, 'rel-runout', cfgMain)
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~SPATIAL CHARACTERISTICS PLOT~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-# plot boxplots for angles, travel lengths and altitude drops
-aP.plotBoxPlot(dbFiltered, ['rel-runout_Angle', 'orig-depo_Angle', 'orig-transit_Angle'], avalancheDir,
-    'angle', renameCols=['alpha', 'beta', 'theta'])
-aP.plotBoxPlot(dbFiltered, ['rel-runout_Distance', 'orig-depo_Distance', 'orig-transit_Distance'],
-    avalancheDir, 'travel length xy')
-aP.plotBoxPlot(dbFiltered, ['rel-runout_LineAltDrop', 'orig-depo_LineAltDrop',
-    'orig-transit_LineAltDrop'], avalancheDir, 'altitude drop')
+'''
+dist = tPM.plotBoxPlot(dbFiltered, ['orig-transit_Distance', 'orig-depo_Distance' ], avalancheDir, 'length', 
+                                 renameY = [r'$s$ [m]', r'$s$ [m]'], ylim=(-500,5000), renameX = ['orig-transit', 'orig-depo'],
+                                 renameTitle= ['Distribution of travel length between origin and transit / deposition'+ '\n'])
+
+angle = tPM.plotBoxPlot(dbFiltered, ['orig-transit_Angle', 'orig-depo_Angle' ], avalancheDir, 'angle', 
+                                 renameY = [r'$\gamma$[°]'], ylim=(10,60), renameX = ['orig-transit', 'orig-depo'],
+                                 renameTitle= ['Distribution of travel angle between origin and transit / deposition'+ '\n'])
+
+altdrop = tPM.plotBoxPlot(dbFiltered, ['orig-transit_LineAltDrop','orig-depo_LineAltDrop' ], avalancheDir, 'altdrop', 
+                                 renameY = [r'$z_{s}$ [m]'], ylim=(-50,2000), renameX = ['orig-transit', 'orig-depo'],
+                                 renameTitle= ['Distribution of altitude difference between origin and transit / deposition'+ '\n'])
+
+
+sangle = tPM.plotBoxPlot(dbFiltered, ['geom_origin_pt3d_%s_snapped_gradient' % projstr,
+                                     'geom_transit_pt3d_%s_snapped_gradient' % projstr,
+                                    'geom_runout_pt3d_%s_snapped_gradient' % projstr], avalancheDir, 'Sangle', 
+                                 renameY = [r'$\theta$ [°]'], ylim=(-10, 60),
+                                 renameX = [r'$\theta_O$ ', r'$\theta_T$', r'$\theta_D$ '],
+                                 renameTitle= ['Distribtion of Slope Angle at Origin, Transit, Deposition point' +'\n'])
+
+tPM.multiplePlots3 ([dist, altdrop, angle, sangle ], 'spatial', '\nSpatial characteristics of Thalweg Analysis\n', avalancheDir)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~INTENSITY CHARACTERISTICS PLOT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+velocity = tPM.plotBoxPlot(dbFiltered, [ 'velocitiesMax_m/s' ], avalancheDir, 'velocity', 
+                                 renameY = [r'$v$ [m/s]'],  ylim=(-5,100), renameX = [ r'$v_{max}$'],
+                                 renameTitle= ['Distribution of maximum velocities' +'\n'])
+
+destructiveness = tPM.plotBoxPlot(dbFiltered, [ 'destructivnessMax_kPa' ], avalancheDir, 'pressure', 
+                                 renameY = [r'$P$ [kPa]'],  ylim=(-250,1750),  renameX = [ r'$P_{max}$'],
+                                 renameTitle= ['Distribution of maximum destructiveness'+'\n'])
+
+time = tPM.plotBoxPlot(dbFiltered, [ 'times(s)' ], avalancheDir, 'time', 
+                                 renameY = [r'$t$ [s]'],  ylim=(-5,200), renameX = [ r'$t_D$'],
+                                 renameTitle= ['Distribution of travel time'+'\n'])
+
+tPM.multiplePlots2([velocity, destructiveness,  time], 'intensity', '\nIntensity characteristics of Thalweg Analysis\n', avalancheDir)
+'''
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~PATH LINE PLOT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#ohne Fit
+tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
+                          ['geom_origin_pt3d_%s_snapped'% projstr,
+                           'geom_transit_pt3d_%s_snapped' % projstr,
+                           'geom_runout_pt3d_%s_snapped' % projstr,
+                           'geom_rel_event_pt3d_%s_snapped'% projstr,
+                           'geom_event_pt3d_%s_snapped'% projstr],
+                            cfgMain, avalancheDir)
+
+#mit Fit
+tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
+                          ['geom_origin_pt3d_%s_snapped'% projstr,
+                           'geom_transit_pt3d_%s_snapped' % projstr,
+                           'geom_runout_pt3d_%s_snapped' % projstr,
+                           'geom_rel_event_pt3d_%s_snapped'% projstr,
+                           'geom_event_pt3d_%s_snapped'% projstr],
+                            cfgMain, avalancheDir, ['curveFitLong_s_z','curveFit_s_z'])
+
+#ohne Event mit Fit
+tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
+                          ['geom_origin_pt3d_%s_snapped'% projstr,
+                           'geom_transit_pt3d_%s_snapped' % projstr,
+                           'geom_runout_pt3d_%s_snapped' % projstr],
+                            cfgMain, avalancheDir, ['curveFitLong_s_z','curveFit_s_z'])
+
+#ohne Event ohne Fit
+tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
+                          ['geom_origin_pt3d_%s_snapped'% projstr,
+                           'geom_transit_pt3d_%s_snapped' % projstr,
+                           'geom_runout_pt3d_%s_snapped' % projstr],
+                            cfgMain, avalancheDir)
+

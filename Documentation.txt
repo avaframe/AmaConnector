@@ -1,0 +1,21 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Aug 22 09:40:50 2024
+
+@author: LawineNaturgefahren
+"""
+
+How to execute:
+    
+    * generate DEMs for each thalweg (runFEtchData.py??)
+    * Analysis of AMA data, Fit analysis, intensity analysis, spatial analysis (runFetchDataAnalyseFit.py)
+    * Plotting results -> last section of runFetchDataAnalyseFit.py
+    * Plotting functions in thalwegPlotsMEDIAN.py
+        * plotBoxplot => violinplot function creates one violin if split is not defined, creates multiple 
+                         violins next to each other (including summery plot) if split is defined
+        * plotScatterplot => creates scatterplots with different parameters on the x- and y-axis 
+    * thalwegPlots.py => pre version of thalwegPlotsMEDIAN, calculates means instead of median
+    * ComparisonPlot.py => hardcoded script to plot AMA results in comparison with international classification
+    * ThalwegPaula.py => imports .csv with coordinates of thalwegs and calculates quantitative characteristics accordingly to the AMA analysis,
+        using fitting method to define D-point
+    * runFetchDataAnalyseEvent.py => calculates spatial characteristics until the runout point (event dense point)
