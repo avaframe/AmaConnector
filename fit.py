@@ -6,7 +6,7 @@ Created on Mon Aug 19 10:45:59 2024
 """
 
 """
-    Run script to fetch data of the database
+    Fitting each AMA thalweg within the dataframe according to the choosen fit method
 """
 
 import pathlib
@@ -19,33 +19,17 @@ from sklearn.metrics import r2_score, mean_squared_error
 
 import avaframe.in3Utils.geoTrans as gT
 import avaframe.in2Trans.ascUtils as IOf
-import avaframe.ana5Utils.DFAPathGeneration as DFAPath
 
 
-
-
-# snap release, runout, origin, transit, deposition points to resampled thalweg for all events found that match criteria
-#dbFiltered = gT.snapPtsToLine(dbFiltered, cfgMain['MAIN']['projstr'], lineName='geom_path_ln3d',
-#    pointsList=[ 'geom_origin_pt3d','geom_transit_pt3d', 'geom_runout_pt3d'])
-
-
-
-'''
-Fitting each AMA thalweg within the dataframe according to the choosen fit method
-'''
-
-def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all'):
+def fitThalweg (dbData, slope1, slope2, resDist, projstr, dsMin, cfg, fitmethod='all'):
     
     for index, row in dbData.iterrows():
-        
-        
+
         #coordinates for the whole thalweg profile, extending the O-point
-        x = get_coordinates(row['geom_path_ln3d_epsg:31287_resampled'])[:,0]
-        y = get_coordinates(row['geom_path_ln3d_epsg:31287_resampled'])[:,1]
-        
+        x = get_coordinates(row['geom_path_ln3d_%s_resampled' % projstr])[:,0]
+        y = get_coordinates(row['geom_path_ln3d_%s_resampled' % projstr])[:,1]
     
         # fetch DEM
-        row['path_name']=row['path_name'].replace(' ','')
         demPath = pathlib.Path('data', 'amaExports', row['path_name'], ('dem_path_%d.asc' % row['path_id']))
         dem = IOf.readRaster(demPath)
     
@@ -53,24 +37,20 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
         avaPath = {'x': x, 'y': y}
         # first resample path and make smoother - TODO check if required - double resampling check line 56
         avaPath, projPoint = gT.prepareLine(dem, avaPath, distance=resDist, Point=None)
-        
-        
+
+        # TODO: is this resampling to resamplePathFit distance required?
+        # it also involves finding the index of the points again on the newly resampled path line
         #crop at origin point - find id of origin on avapath
         oPoint = {'x':[row['geom_origin_pt3d_%s_snapped' % projstr].x], 'y':[row['geom_origin_pt3d_%s_snapped' % projstr].y]}
         origin = gT.findClosestPoint(avaPath['x'], avaPath['y'], oPoint)
         dbData.loc[index, 'origin'] = origin
-        
-    
-        
-        
+
         #subtract the resolution * the index of origin from the distances, to set origin to distance 0
         avaPath['s'] -= resDist*int(origin)
         avaPathLong = avaPath.copy()
         
         dbData.at[index,'geom_avaPathLong_s_z'] = LineString(list(zip(avaPathLong['s'], avaPathLong['z'])))
         dbData.at[index,'geom_avaPathLong_ln3d_%s_resampled'%projstr] = LineString(list(zip(avaPathLong['x'], avaPathLong['y'], avaPathLong['z'])))
-        
-        
         
         if fitmethod == 'all':
             
@@ -94,19 +74,18 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
             avaPathCrop = avaPath
             
             #beta angles for crop with thalweg (Dmax)
-            m6 = math.tan(math.radians(-22))
-            m5 = math.tan(math.radians(-28))
-            m4 = math.tan(math.radians(-32))
-            m3 = math.tan(math.radians(-36))
-            m2 = math.tan(math.radians(-38))
+            m6 = math.tan(math.radians(cfg['MAIN'].getfloat('m6')))
+            m5 = math.tan(math.radians(cfg['MAIN'].getfloat('m5')))
+            m4 = math.tan(math.radians(cfg['MAIN'].getfloat('m4')))
+            m3 = math.tan(math.radians(cfg['MAIN'].getfloat('m3')))
+            m2 = math.tan(math.radians(cfg['MAIN'].getfloat('m2')))
             gradients = [m6,m5,m4,m3,m2]
             
             for m in gradients:
-                
                 d = aU.calculatetravelLine(m, avaPathCrop, origin)
                 intersec = d.intersection(LineString(list(zip(avaPath['s'], avaPath['z']))))
                 
-                
+                # TODO: why index of 10?
                 if intersec.geom_type == 'MultiPoint':
                     endPointID = aU.createCutOff(d, intersec)
                     if endPointID > 10:
@@ -130,12 +109,12 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
             
         
         # Do a fit Curve Parabola Fit
-        point= {'x':row['geom_origin_pt3d_epsg:31287_snapped'].xy[0], 'y':row['geom_origin_pt3d_epsg:31287_snapped'].xy[1]}
+        point= {'x':row['geom_origin_pt3d_epsg:31287_snapped'].xy[0], 'y':row['geom_origin_pt3d_%s_snapped' % projstr].xy[1]}
         restraint = gT.findClosestPoint(avaPath['x'], avaPath['y'], point)
         uncertainty = np.zeros(len(avaPath['s'])) + 1.
         uncertainty[restraint] = 0.001
         
-        curveProfileLong, curveProfileFit, curvature, b, c = DFAPath.fitCurveParabola(avaPath, avaPathLong, uncertainty) #NOTICE curveProfile z values = z values from avaProfile, zFit = fitted z Values 
+        curveProfileLong, curveProfileFit, curvature, b, c = aU.fitCurveParabola(avaPath, avaPathLong, uncertainty) #NOTICE curveProfile z values = z values from avaProfile, zFit = fitted z Values
         curveProfileDictLong = {'s':curveProfileLong['s'],'z':curveProfileLong['zFit']}
         curveProfileDictFit = {'s':curveProfileFit['s'],'z':curveProfileFit['zFit']}
         
@@ -145,17 +124,13 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
         mse = np.square(np.subtract(avaPath['z'], curveProfileDictFit['z'])).mean()
         rmse = math.sqrt(mse)
         dbData.at[index,'rmse'] = rmse
-        
-        
+
+        # TODO: when is the SOI used? is this still required?
         soi1cf = aU.findAngleInProfile(slope1, avaPathLong,
                                               curveProfileDictLong, dsMin)
         soi2cf = aU.findAngleInProfile(slope2, avaPathLong,
                                            curveProfileDictLong, dsMin)
-        
-        
-        
         # Add soi points and avapath, fitted path to dataframe
-       
         if soi1cf != '':
             dbData.at[index,'geom_soi_%s°_cf_pt3d_%s' %(slope1, projstr)] = Point(soi1cf['x'], soi1cf['y'], soi1cf['z'])
             dbData.at[index, 'soi_%s°_s'%slope1] = soi1cf['s']
@@ -165,8 +140,8 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
             dbData.at[index, 'soi_%s°_s'%slope2] = soi2cf['s']
         
         # Fitted path added with z, s coordinates
-        # Avapath added with x,y,z as well as another wolumn with z, s
-        dbData.at[index,'geom_avaPath_ln3d_%s_resampled'%projstr]=LineString(list(zip(avaPath['x'], avaPath['y'], avaPath['z'])))
+        # Avapath added with x,y,z as well as another column with z, s
+        dbData.at[index, 'geom_avaPath_ln3d_%s_resampled'%projstr]=LineString(list(zip(avaPath['x'], avaPath['y'], avaPath['z'])))
         dbData.at[index, 'avaPath_s_z'] = LineString(list(zip(avaPath['s'], avaPath['z'])))
         dbData.at[index, 'curveFitLong_s_z'] = LineString(list(zip(curveProfileLong['s'], curveProfileLong['zFit'])))
         dbData.at[index, 'curveFit_s_z'] = LineString(list(zip(curveProfileDictFit['s'], curveProfileDictFit['z'])))

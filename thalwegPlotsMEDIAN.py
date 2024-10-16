@@ -9,27 +9,20 @@ Created on Fri Jun 21 07:57:33 2024
 """
 script for creating thalweg analyse plots
 """
-from shapely import wkb, LineString, Point, length
-import shapely as sp
-from shapely.ops import split
+
 import numpy as np
-from shapely import get_coordinates
 import pandas as pd
-import geopandas
 import pathlib
 import os
 import seaborn as sns
 import matplotlib.pyplot as plt
-import matplotlib.colors
-from sklearn.linear_model import LinearRegression
-
 
 # local imports
 import avaframe.in3Utils.geoTrans as gT
 import avaframe.out3Plot.plotUtils as pU
 
 
-def plotBoxPlot(dbData, colList, outDir, namePlot, ylim=(0,0), split='', renameCols=[], renameTitle=[], renameY=[], renameX=[]):
+def plotBoxPlot(dbData, colList, outDir, namePlot, ylim=(0,0), split='', renameTitle=[], renameY=[], renameX=[]):
     """ create a violin plot of colList from dbData
 
         Parameters
@@ -46,8 +39,6 @@ def plotBoxPlot(dbData, colList, outDir, namePlot, ylim=(0,0), split='', renameC
             if specified range of y-axis
         split: string
             name of a column in dbData by which the data should be split
-        renameCols: array of strings
-            label for x axis
         renameTitle: array of stings
             if specified, individual names for plots
         renameY: array of stings
@@ -264,7 +255,6 @@ def multiplePlots3 (plist, name, title, outdir):
         col = i % ncols   # Determine the column index
         axes[row, col].imshow(plt.imread(plotpath))
         axes[row, col].axis('off')  # Hide the axes for better display
-        os.remove(plotpath)
 
     for ax in axes.flatten():
         ax.grid(False)
@@ -281,9 +271,7 @@ def multiplePlots2 (plist, name, title, outdir):
     fig.suptitle(title)
     
     for i, plotpath in enumerate(plist):
-        
         axes[i].imshow(plt.imread(plotpath))
-        os.remove(plotpath)
 
     for ax in axes.flatten():
         ax.grid(False)
@@ -292,12 +280,9 @@ def multiplePlots2 (plist, name, title, outdir):
 
     outFile = name
     pU.saveAndOrPlot({'pathResult': outdir}, outFile, fig)
-    
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, pathList=[],):
+
+def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, pathList=[], name1=''):
     
     """ 
         create x-y plot of thalweg using s(distances) and z-coordinates
@@ -310,37 +295,29 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
             name of Thalweg column in db, with x,y,z coordinates
         avaPathzs: string
             name of Thalweg column in db, with s and z coordinates
-        pathList: list with strings
-            list with column names of fitted paths
         pointList: list of strings
             list with column names of points which should be plotted on thalweg
         cfg: configuration File
             information about: slope angles, resample distance, projection, working Dir
-        outDir: pathlib path or str
-            path to folder where plot shall be saved to
+        pathList: list with strings
+            list with column names of fitted paths
+        name1: str
+            name to be added to plate name to indicate what options are used
         
         
     """
-    
-    
-    plt.rcParams["text.usetex"] = True
-    pathlist = []
+
     avalancheDir = pathlib.Path(cfg['MAIN']['avalancheDir'])
-    slope1=cfg['MAIN']['slopeAngle1']
-    slope2=cfg['MAIN']['slopeAngle2']
-    projstr=cfg['MAIN']['projstr']
     fitOption = cfg['FILTERING']['fit']
-  
+
     # loop over all events in dbData
     for index, row in db.iterrows():
-        
         avaPath = {'x' : row[avaPathLine].xy[0],
                    'y' : row[avaPathLine].xy[1],
                    'z' : row[avaPathsz].xy[1],
                    's' : row[avaPathsz].xy[0]}
         
         fig, axes = plt.subplots(figsize=(8,5))
-        
         if pathList != []:
             for path in pathList:
                 if path == 'curveFit_s_z':
@@ -351,14 +328,14 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
                 else:
                     plt.plot(row[path].xy[0], row[path].xy[1], '--', color ='blue', lw=1)
             
-        if row['maxpotsize']:
+        if 'maxpotsize' in row:
             label = 'thalweg maxpotsize: ' + str(row['maxpotsize'])
         else: 
             label = 'full thalweg'
         plt.plot(avaPath['s'], avaPath['z'], '--', color='grey', label=label)
         plt.plot(avaPath['s'][int(row['origID']):int(row['depoID'])], avaPath['z'][int(row['origID']):int(row['depoID'])], label='thalweg section of interest', color='k', lw=1.5)
         
-        for  point in pointList:
+        for point in pointList:
             
             if pd.notna(row[point]):
                 pointDict = {'x':[row[point].x], 
@@ -393,14 +370,7 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
                     legend = r'R-point $\gamma_R =\alpha:$' + str(round(row['orig-runout_Angle'],2))
                     #legend = 'depo γ(depo): ' +str(round(row['orig-depo_Angle'],2)) 
                     plt.plot(avaPath['s'][pointAvapath], avaPath['z'][pointAvapath], '*', markersize=10, color='grey', label=legend)
-                      
-                    
-                
-                
-                
-                
-        
-        #plt.plot(avaPath['s'][57], avaPath['z'][57], '.', color='yellow', label='transitangleParaFit')
+
         plt.xlabel(r'$s_{xy}$ [m]', fontsize=18)
         plt.ylabel(r'$z_s$ [m]', fontsize=18)
         plt.legend(facecolor='white', fontsize ='large')
@@ -408,11 +378,8 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
         axes.set_facecolor('xkcd:white')
         axes.tick_params(axis='both', labelsize=16)
         
-        outFile = ('%s_%s_analysis' % (row['path_name'], row['path_id']))
+        outFile = ('%s_%s_analysis_%s' % (row['path_name'], row['path_id'], name1))
         outFile = outFile.replace(' ','')
         outFile = outFile.replace('/','_')
-        plotPath = pU.saveAndOrPlot({'pathResult': avalancheDir}, outFile, fig)
-        pathlist.append(plotPath)
+        _ = pU.saveAndOrPlot({'pathResult': avalancheDir}, outFile, fig)
         
-
-    return pathlist

@@ -17,18 +17,15 @@ import math
 import avaframe.in3Utils.geoTrans as gT
 import avaframe.in2Trans.ascUtils as IOf
 
-def intensityCharacteristics (dbData, resDist):
+def intensityCharacteristics (dbData, resDist, cfg):
     
     for index, row in dbData.iterrows():
         
         # total length of thalweg
-        x = get_coordinates(row['geom_path_ln3d_epsg:31287_resampled'])[:,0]
-        y = get_coordinates(row['geom_path_ln3d_epsg:31287_resampled'])[:,1]
-        
-    
-        
+        x = get_coordinates(row['geom_path_ln3d_%s_resampled' % cfg['MAIN']['projstr']])[:,0]
+        y = get_coordinates(row['geom_path_ln3d_%s_resampled' % cfg['MAIN']['projstr']])[:,1]
+
         # fetch DEM
-        row['path_name']=row['path_name'].replace(' ','')
         demPath = pathlib.Path('data', 'amaExports', row['path_name'], ('dem_path_%d.asc' % row['path_id']))
         dem = IOf.readRaster(demPath)
     
@@ -36,15 +33,19 @@ def intensityCharacteristics (dbData, resDist):
         avaPath = {'x': x, 'y': y}
         # first resample path and make smoother - TODO check if required - double resampling check line 56
         avaPath, projPoint = gT.prepareLine(dem, avaPath, distance=resDist, Point=None)
-        
-    
-        opoint =  {'x':row['geom_origin_pt3d_epsg:31287_snapped'].xy[0], 'y':row['geom_origin_pt3d_epsg:31287_snapped'].xy[1]}
+
+        # TODO: is this resampling to resamplePathFit distance required?
+        # it also involves finding the index of the points again on the newly resampled path line
+        opoint =  {'x':row['geom_origin_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[0],
+                   'y':row['geom_origin_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[1]}
         origin = gT.findClosestPoint(avaPath['x'], avaPath['y'], opoint)
         
-        tpoint =  {'x':row['geom_transit_pt3d_epsg:31287_snapped'].xy[0], 'y':row['geom_transit_pt3d_epsg:31287_snapped'].xy[1]}
+        tpoint =  {'x':row['geom_transit_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[0],
+                   'y':row['geom_transit_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[1]}
         transit = gT.findClosestPoint(avaPath['x'], avaPath['y'], tpoint)
         
-        dpoint = {'x':row['geom_runout_pt3d_epsg:31287_snapped'].xy[0], 'y':row['geom_runout_pt3d_epsg:31287_snapped'].xy[1]}
+        dpoint = {'x':row['geom_runout_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[0],
+                  'y':row['geom_runout_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[1]}
         depo = gT.findClosestPoint(avaPath['x'], avaPath['y'], dpoint)
         
         dbData.at[index,'depoID'] = depo
@@ -63,20 +64,18 @@ def intensityCharacteristics (dbData, resDist):
         zD = z[-1]
         sD = sxy[-1]
         
-        
         velocities_kmh =[]
         velocities_ms =[]
         velocities_kPa =[]
         times =[]
-    
         
         for i, dist in enumerate(sxy):
                 
                 zdelta = abs(zO-z[i]-sxy[i]*((zO-zD)/sD))
-                veloc = math.sqrt(zdelta*2*9.81)
+                veloc = math.sqrt(zdelta*2.*cfg['MAIN'].getfloat('g'))
                 velocities_ms.append(veloc)
                 velocities_kmh.append(veloc*3.6)
-                velocities_kPa.append(((veloc**2)*200)/1000)
+                velocities_kPa.append(((veloc**2.)*cfg['MAIN'].getfloat('density'))/1000.)
                 
                 if i  < len(dz):
                     if veloc == 0:
