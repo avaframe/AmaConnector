@@ -17,7 +17,7 @@ import math
 import avaframe.in3Utils.geoTrans as gT
 import avaframe.in2Trans.ascUtils as IOf
 
-def intensityCharacteristics (dbData, resDist):
+def intensityCharacteristics (dbData, resDist, cfg):
     
     for index, row in dbData.iterrows():
         
@@ -72,10 +72,10 @@ def intensityCharacteristics (dbData, resDist):
         for i, dist in enumerate(sxy):
                 
                 zdelta = abs(zO-z[i]-sxy[i]*((zO-zD)/sD))
-                veloc = math.sqrt(zdelta*2*9.81)
+                veloc = math.sqrt(zdelta*2.*cfg['MAIN'].getfloat('g'))
                 velocities_ms.append(veloc)
                 velocities_kmh.append(veloc*3.6)
-                velocities_kPa.append(((veloc**2)*200)/1000)
+                velocities_kPa.append(((veloc**2.)*cfg['MAIN'].getfloat('density'))/1000.)
                 
                 if i  < len(dz):
                     if veloc == 0:
