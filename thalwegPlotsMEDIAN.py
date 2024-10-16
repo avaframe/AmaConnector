@@ -297,7 +297,7 @@ def multiplePlots2 (plist, name, title, outdir):
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, pathList=[],):
+def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, pathList=[], name1=''):
     
     """ 
         create x-y plot of thalweg using s(distances) and z-coordinates
@@ -318,12 +318,12 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
             information about: slope angles, resample distance, projection, working Dir
         outDir: pathlib path or str
             path to folder where plot shall be saved to
+        name1: str
+            name to be added to plate name to indicate what options are used
         
         
     """
-    
-    
-    plt.rcParams["text.usetex"] = True
+
     pathlist = []
     avalancheDir = pathlib.Path(cfg['MAIN']['avalancheDir'])
     slope1=cfg['MAIN']['slopeAngle1']
@@ -351,7 +351,7 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
                 else:
                     plt.plot(row[path].xy[0], row[path].xy[1], '--', color ='blue', lw=1)
             
-        if row['maxpotsize']:
+        if 'maxpotsize' in row:
             label = 'thalweg maxpotsize: ' + str(row['maxpotsize'])
         else: 
             label = 'full thalweg'
@@ -408,7 +408,7 @@ def plotSlopeAngelAnalysis (db, avaPathLine, avaPathsz, pointList, cfg, outDir, 
         axes.set_facecolor('xkcd:white')
         axes.tick_params(axis='both', labelsize=16)
         
-        outFile = ('%s_%s_analysis' % (row['path_name'], row['path_id']))
+        outFile = ('%s_%s_analysis_%s' % (row['path_name'], row['path_id'], name1))
         outFile = outFile.replace(' ','')
         outFile = outFile.replace('/','_')
         plotPath = pU.saveAndOrPlot({'pathResult': avalancheDir}, outFile, fig)

@@ -33,8 +33,8 @@ import avaframe.in2Trans.ascUtils as IOf
 import DFAPathGeneration as DFAPath
 import avaframe.out3Plot.plotUtils as pU
 
-#use latex in str
-plt.rcParams["text.usetex"] = True
+# use latex in str
+# plt.rcParams["text.usetex"] = True
 # +++++++++SETUP CONFIGURATION++++++++++++++++++++++++
 # log file name; leave empty to use default runLog.log
 logName = 'runFetchDataAnalyse'
@@ -175,7 +175,7 @@ tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % pr
                            'geom_runout_pt3d_%s_snapped' % projstr,
                            'geom_rel_event_pt3d_%s_snapped'% projstr,
                            'geom_event_pt3d_%s_snapped'% projstr],
-                            cfgMain, avalancheDir)
+                            cfgMain, avalancheDir, name1='EventNoFit')
 
 #mit Fit
 tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
@@ -184,19 +184,19 @@ tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % pr
                            'geom_runout_pt3d_%s_snapped' % projstr,
                            'geom_rel_event_pt3d_%s_snapped'% projstr,
                            'geom_event_pt3d_%s_snapped'% projstr],
-                            cfgMain, avalancheDir, ['curveFitLong_s_z','curveFit_s_z'])
+                            cfgMain, avalancheDir, ['curveFitLong_s_z','curveFit_s_z'], name1='EventWtihFit')
 
 #ohne Event mit Fit
 tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
                           ['geom_origin_pt3d_%s_snapped'% projstr,
                            'geom_transit_pt3d_%s_snapped' % projstr,
                            'geom_runout_pt3d_%s_snapped' % projstr],
-                            cfgMain, avalancheDir, ['curveFitLong_s_z','curveFit_s_z'])
+                            cfgMain, avalancheDir, ['curveFitLong_s_z','curveFit_s_z'], name1='noEventWithFit')
 
 #ohne Event ohne Fit
 tPM.plotSlopeAngelAnalysis(dbFiltered, 'geom_avaPathLong_ln3d_%s_resampled' % projstr,'geom_avaPathLong_s_z',
                           ['geom_origin_pt3d_%s_snapped'% projstr,
                            'geom_transit_pt3d_%s_snapped' % projstr,
                            'geom_runout_pt3d_%s_snapped' % projstr],
-                            cfgMain, avalancheDir)
+                            cfgMain, avalancheDir, name1='noEventNoFit')
 

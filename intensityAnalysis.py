@@ -28,7 +28,6 @@ def intensityCharacteristics (dbData, resDist):
     
         
         # fetch DEM
-        row['path_name']=row['path_name'].replace(' ','')
         demPath = pathlib.Path('data', 'amaExports', row['path_name'], ('dem_path_%d.asc' % row['path_id']))
         dem = IOf.readRaster(demPath)
     

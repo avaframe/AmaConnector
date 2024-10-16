@@ -1,5 +1,6 @@
 from shapely import wkb, LineString, Point, length
 from shapely.ops import split
+from scipy.optimize import curve_fit
 import math
 import numpy as np
 import pandas as pd
@@ -184,7 +185,7 @@ def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
 
 def findAngleInProfile(pointAngle, avaPath, profile, dsMin):
 
-    anglePara, incline, tmpPara, dsPara = gT.prepareAngleProfile(pointAngle, profile, raiseWarning=False)
+    anglePara, tmpPara, dsPara = gT.prepareAngleProfile(pointAngle, profile, raiseWarning=False)
 
     try:
         indSplitPoint = gT.findAngleProfile(tmpPara, dsPara, dsMin)
@@ -452,3 +453,35 @@ def createCutOff (line, intersection):
     endPointID = (np.abs(x_values - furthestIntersec.x)).argmin()
     #Origin hinterm Grad, gerade schneidet zweimal aber irrelevant
     return endPointID
+
+
+def funcParabola(s, a, b, c):
+    # a * (s**2) + b * s + c
+    # a * np.exp(-b *s**2)  + c
+    # a * np.exp(-b * s) + c
+
+    return a * (s ** 2) + b * s + c
+
+
+def fitCurveParabola(avaProfileFit, avaProfileLong, uncertainty=None):
+    """use scipy optimize and a parabola function to create a fit to a profile
+    options to define uncertainty of data
+    Parameters
+    -----------
+    avaProfile: dict
+        dictionary with s, coordinate along profile, z elevation of profile
+    uncertainty: numpy array
+        array of uncertainty values of data - same length as s, z arrays, default is 1
+    Returns
+    --------
+    avaProfile: dict
+        updated dict with zFit - array of elevation of fit
+    """
+
+    popt, pcov = curve_fit(funcParabola, avaProfileFit['s'], avaProfileFit['z'], sigma=uncertainty, maxfev=10000)
+    curvature = 2 * popt[0]
+
+    avaProfileLong['zFit'] = funcParabola(avaProfileLong['s'], *popt)
+    avaProfileFit['zFit'] = funcParabola(avaProfileFit['s'], *popt)
+
+    return avaProfileLong, avaProfileFit, curvature, popt[1], popt[2]

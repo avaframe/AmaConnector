@@ -45,7 +45,6 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
         
     
         # fetch DEM
-        row['path_name']=row['path_name'].replace(' ','')
         demPath = pathlib.Path('data', 'amaExports', row['path_name'], ('dem_path_%d.asc' % row['path_id']))
         dem = IOf.readRaster(demPath)
     
@@ -135,7 +134,7 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr,dsMin, fitmethod='all')
         uncertainty = np.zeros(len(avaPath['s'])) + 1.
         uncertainty[restraint] = 0.001
         
-        curveProfileLong, curveProfileFit, curvature, b, c = DFAPath.fitCurveParabola(avaPath, avaPathLong, uncertainty) #NOTICE curveProfile z values = z values from avaProfile, zFit = fitted z Values 
+        curveProfileLong, curveProfileFit, curvature, b, c = aU.fitCurveParabola(avaPath, avaPathLong, uncertainty) #NOTICE curveProfile z values = z values from avaProfile, zFit = fitted z Values
         curveProfileDictLong = {'s':curveProfileLong['s'],'z':curveProfileLong['zFit']}
         curveProfileDictFit = {'s':curveProfileFit['s'],'z':curveProfileFit['zFit']}
         
