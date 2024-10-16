@@ -1,17 +1,16 @@
 from shapely import wkb, LineString, Point, length
 from shapely.ops import split
-import math
+from scipy.optimize import curve_fit
 import numpy as np
 import pandas as pd
 import geopandas
+import logging
+
 import avaframe.in3Utils.geoTrans as gT
 
 
-def replaceMaxpotsize(row):
-    if row['maxpotsize'] == 0 or row['avalanche_size'] > row['maxpotsize']:
-        return row['avalanche_size']
-    else:
-        return row['maxpotsize']
+# create local logger
+log = logging.getLogger(__name__)
 
 
 def fetchGeometryInfo(dbData, srcprojstr, projstr, geomStr, nonEmptyCols, addAttributes, resampleDist):
@@ -82,7 +81,7 @@ def fetchGeometryInfo(dbData, srcprojstr, projstr, geomStr, nonEmptyCols, addAtt
 
     return dbFilteredGeom
 
-import matplotlib.pyplot as plt
+
 def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
     """ compute the distance along line between point1 and point 2 and angle of this part of the line
 
@@ -175,7 +174,6 @@ def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
           distanceEvent.append(np.nan)
             
     # append to DF
-    #print(distancePath)
     dbData['%s_PathDist' % name] = distancePath
     dbData['%s_LineDist' % name] = distanceEvent
 
@@ -184,7 +182,7 @@ def addXYDistAngle(dbData, line, point1, point2, projstr, name='event'):
 
 def findAngleInProfile(pointAngle, avaPath, profile, dsMin):
 
-    anglePara, incline, tmpPara, dsPara = gT.prepareAngleProfile(pointAngle, profile, raiseWarning=False)
+    anglePara, tmpPara, dsPara = gT.prepareAngleProfile(pointAngle, profile, raiseWarning=False)
 
     try:
         indSplitPoint = gT.findAngleProfile(tmpPara, dsPara, dsMin)
@@ -192,26 +190,25 @@ def findAngleInProfile(pointAngle, avaPath, profile, dsMin):
                       'z': avaPath['z'][indSplitPoint], 'zPara': profile['z'][indSplitPoint],
                       's': profile['s'][indSplitPoint]}
     except IndexError:
-        noSplitPointFoundMessage = ('Automated split point generation failed as no point where slope is less than %s°'
-                                    'was found, provide the split point manually.' % pointAngle)
+        noSplitPointFoundMessage = ('No point found for angle: %s°' % pointAngle)
         pointFound = ''
-        #log.warning(noSplitPointFoundMessage)
+        log.warning(noSplitPointFoundMessage)
 
-    return  pointFound
+    return pointFound
 
 
-def addGradientForPoint (db, pathName, pointList, distance=0.1):
-    """ calculates slope angle 
+def addGradientForPoint (db, pathName, pointList):
+    """ calculates slope angle for all points in pointList; if available the angle is computed over a distance
+        stretching from 3 points before to 3 points after the point of interest; hence strongly dependent on the resampling distance of the path line
 
         Parameters
         -----------
        db:
-            dataframe with relevant informations
+            dataframe with relevant information
        pathName:
            str with column name of the thalweg
        pointList:
            List of str with column names of points to be analysed
-           
 
         Returns
         --------
@@ -220,19 +217,15 @@ def addGradientForPoint (db, pathName, pointList, distance=0.1):
     
     #for loop over point list, to calculate slope angles of all relevant points
     for attr in pointList:
-        targetPointList = db[attr]
         db[attr+'_gradient'] = 0
         #for loop to calculate slope angle for all thalwegs 
         for index, row in db.iterrows():
-            
-           
-            path = db[pathName][index]
-            targetPoint = targetPointList[index]
+            path = row[pathName]
+            targetPoint = row[attr]
             if type(targetPoint) == type(Point()):
-                
                 #identification of the ID of the point of interest
-                targetPoint = {'x':[targetPoint.x], 'y':[targetPoint.y]}
-                targetPointID = gT.findClosestPoint(path.xy[0],path.xy[1], targetPoint)
+                targetPointDict = {'x':[targetPoint.x], 'y':[targetPoint.y]}
+                targetPointID = gT.findClosestPoint(path.xy[0],path.xy[1], targetPointDict)
                 
                 #determine if point is the first point of line (origin)
                 if path.coords[targetPointID] == path.coords[0]:
@@ -265,8 +258,7 @@ def addGradientForPoint (db, pathName, pointList, distance=0.1):
                 slope = calculateSlope(pointBefore, pointBehind)
                 
                 db.loc[index, '%s_gradient' % attr] =abs(slope)
-                #db[attr+'_gradient'][index] = slope
-            
+
     return db
 
 def calculateSlope(point1, point2):
@@ -275,127 +267,6 @@ def calculateSlope(point1, point2):
     slope = np.rad2deg(np.arctan(deltaEle / dist))
     return slope
 
-'''
-def decToDegrees(value):
-    
-    rad = math.atan(value)
-    deg = math.degrees(rad)
-    
-    return deg
-'''
-
-def calcQuantiles (dbData, colList, qu = [0.25,0.5,0.75]):
-    """ calculates statistical values to be exported as table
-
-        Parameters
-        -----------
-       dbData:
-            Dataframe with the relevant data
-       colList:
-           columns to be analysed
-       qu:
-           which quantiles should be calculated
-           
-
-        Returns
-        --------
-        quantilesTB: Dataframe with calculated statistics
-    """
-    quantileTB = pd.DataFrame(columns=['name','all','2','3','4','5'])
-    #colList =['path_id', 'event_id']
-    for col in colList:
-        
-        quantileM0 = dbData.groupby('maxpotsize')[col].quantile(qu[0])
-        quantileM1 = dbData.groupby('maxpotsize')[col].quantile(qu[1])
-        quantileM2 = dbData.groupby('maxpotsize')[col].quantile(qu[2])
-        #quantileAll0 = dbData[col].quantile( qu[0])
-        #quantileAll1 = dbData[col].quantile( qu[1])
-        #quantileAll2 = dbData[col].quantile( qu[2])
-        
-        quantileAll0 = np.quantile(pd.Series(dbData[col]), qu[0])
-        quantileAll1 = np.quantile(pd.Series(dbData[col]), qu[1])
-        quantileAll2 = np.quantile(pd.Series(dbData[col]), qu[2])
-        quantileAll0 = pd.Series(quantileAll0)
-        quantileAll1 = pd.Series(quantileAll1)
-        quantileAll2 = pd.Series(quantileAll2)
-        
-    
-        index = quantileM0.index
-        
-        row = {'name': str(col)+'_'+str(qu[0]), 'all': round(quantileAll0,2)}
-        for idx in index:
-            row[str(idx)]=round(quantileM0[2],2)
-            
-        row = {'name': str(col)+'_'+str(qu[0]), 'all': round(quantileAll0[0],2), '2': round(quantileM0[2],2), '3': round(quantileM0[3],2), '4': round(quantileM0[4],2), '5': round(quantileM0[5],2)}
-        
-        row_df = pd.DataFrame([row])
-        quantileTB = pd.concat([quantileTB, row_df], ignore_index=True)
-
-        row = {'name': str(col)+'_'+str(qu[1]), 'all': round(quantileAll1,2)}
-        for idx in index:
-            row[str(idx)]=round(quantileM1[2],2)
-
-        row = {'name': str(col)+'_'+str(qu[1]), 'all': round(quantileAll1[0],2), '2': round(quantileM1[2],2), '3': round(quantileM1[3],2), '4': round(quantileM1[4],2), '5': round(quantileM1[5],2)}
-        row_df = pd.DataFrame([row])
-        quantileTB = pd.concat([quantileTB, row_df], ignore_index=True)
-    
-        row = {'name': str(col)+'_'+str(qu[2]), 'all': round(quantileAll2,2)}
-        for idx in index:
-            row[str(idx)]=round(quantileM2[2],2)
-            
-        row = {'name': str(col)+'_'+str(qu[2]), 'all': round(quantileAll2[0],2), '2': round(quantileM2[2],2), '3': round(quantileM2[3],2), '4': round(quantileM2[4],2), '5': round(quantileM2[5],2)}
-        row_df = pd.DataFrame([row])
-        quantileTB = pd.concat([quantileTB, row_df], ignore_index=True)
-        
-    
-    return quantileTB
-                              
-def addAngleDistXYOnFit(dbData, pathname, snappoints, fittedProfil, fitname=''):
-    """ compute the slope, length, altitude diff, angle and snap on fit for fitted thalweg
-
-    """
-
-    for index, row in dbData.iterrows(): 
-        
-                
-        path = row[pathname]
-        origin = int(row['origin'] )
-        
-        
-        for snappoint in snappoints:
-            
-            pointname1 = snappoint.find('_')
-            pointname2 = snappoint.find('_', pointname1 + 1)
-            pointname = snappoint[pointname1 + 1:pointname2]
-            try:
-                spoint = row[snappoint]
-                spoint = {'x':[spoint.x], 'y':[spoint.y]}
-                pointId = gT.findClosestPoint(path.xy[0],path.xy[1], spoint)
-                snapOnFit = Point(row[fittedProfil].coords[pointId])
-                
-                line1 = split(row[fittedProfil], snapOnFit)
-                length = line1.geoms[0].coords[-1][0]
-                distanceFit = row[fittedProfil].xy[0][pointId]
-                
-                
-                elevationDiff = Point(row[fittedProfil].coords[origin]).y - snapOnFit.y
-                angle = np.rad2deg(np.arctan(elevationDiff / distanceFit))
-                
-                #db, slope = addGradientForPoint(dbData, pathname, [snappoint])
-                pointbefore = Point(row[fittedProfil].coords[pointId-3])
-                pointbehind = Point(row[fittedProfil].coords[pointId+3])
-                dz = pointbefore.y - pointbehind.y
-                ds = pointbehind.x - pointbefore.x
-                slope = np.rad2deg(np.arctan(dz / ds))
-                dbData.loc[index, '%s_slope_%s' %(pointname, fitname)] = abs(slope)
-                dbData.loc[index, 'origin-%s_distance_%s' %(pointname,fitname)] = length
-                dbData.loc[index, 'origin-%s_altDrop_%s' %(pointname,fitname)] = elevationDiff
-                dbData.loc[index, 'origin-%s_angle_%s' %(pointname,fitname)] = angle
-                dbData.loc[index, '%s_on_%s' %(pointname, fitname)] = snapOnFit
-            except:
-                continue
-            
-    return dbData
 
 def calculatetravelLine(m, avaPath, origin):
     """ calculates line based on travel angle
@@ -448,7 +319,38 @@ def createCutOff (line, intersection):
             furthestIntersec = point
     
     x_values = [point[0] for point in line.coords]
-    #y_values = [point[1] for point in d6Line.coords]
     endPointID = (np.abs(x_values - furthestIntersec.x)).argmin()
     #Origin hinterm Grad, gerade schneidet zweimal aber irrelevant
     return endPointID
+
+
+def funcParabola(s, a, b, c):
+    # a * (s**2) + b * s + c
+    # a * np.exp(-b *s**2)  + c
+    # a * np.exp(-b * s) + c
+
+    return a * (s ** 2) + b * s + c
+
+
+def fitCurveParabola(avaProfileFit, avaProfileLong, uncertainty=None):
+    """use scipy optimize and a parabola function to create a fit to a profile
+    options to define uncertainty of data
+    Parameters
+    -----------
+    avaProfile: dict
+        dictionary with s, coordinate along profile, z elevation of profile
+    uncertainty: numpy array
+        array of uncertainty values of data - same length as s, z arrays, default is 1
+    Returns
+    --------
+    avaProfile: dict
+        updated dict with zFit - array of elevation of fit
+    """
+
+    popt, pcov = curve_fit(funcParabola, avaProfileFit['s'], avaProfileFit['z'], sigma=uncertainty, maxfev=10000)
+    curvature = 2 * popt[0]
+
+    avaProfileLong['zFit'] = funcParabola(avaProfileLong['s'], *popt)
+    avaProfileFit['zFit'] = funcParabola(avaProfileFit['s'], *popt)
+
+    return avaProfileLong, avaProfileFit, curvature, popt[1], popt[2]
