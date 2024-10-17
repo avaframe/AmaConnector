@@ -1,0 +1,16 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Aug 22 09:40:50 2024
+
+@author: LawineNaturgefahren
+"""
+
+How to execute:
+    
+    * generate DEMs for each thalweg (runExportEventsData.py)
+    * Analysis of AMA data, Fit analysis, intensity analysis, spatial analysis (runFetchDataAnalyseNew.py)
+    * Plotting results -> last section of runFetchDataAnalyseNew.py
+    * Plotting functions in thalwegPlotsMEDIAN.py
+        * plotBoxplot => violinplot function creates one violin if split is not defined, creates multiple 
+                         violins next to each other (including summery plot) if split is defined
+    * runFetchDataAnalyseNew.py => calculates spatial characteristics until the runout point (event dense point)
