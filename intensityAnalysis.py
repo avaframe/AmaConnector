@@ -35,6 +35,7 @@ def intensityCharacteristics (dbData, resDist, cfg):
         avaPath, projPoint = gT.prepareLine(dem, avaPath, distance=resDist, Point=None)
 
         # TODO: is this resampling to resamplePathFit distance required?
+        # it also involves finding the index of the points again on the newly resampled path line
         opoint =  {'x':row['geom_origin_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[0],
                    'y':row['geom_origin_pt3d_%s_snapped' % cfg['MAIN']['projstr']].xy[1]}
         origin = gT.findClosestPoint(avaPath['x'], avaPath['y'], opoint)

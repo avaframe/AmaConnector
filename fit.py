@@ -37,7 +37,9 @@ def fitThalweg (dbData, slope1, slope2, resDist, projstr, dsMin, cfg, fitmethod=
         avaPath = {'x': x, 'y': y}
         # first resample path and make smoother - TODO check if required - double resampling check line 56
         avaPath, projPoint = gT.prepareLine(dem, avaPath, distance=resDist, Point=None)
-        
+
+        # TODO: is this resampling to resamplePathFit distance required?
+        # it also involves finding the index of the points again on the newly resampled path line
         #crop at origin point - find id of origin on avapath
         oPoint = {'x':[row['geom_origin_pt3d_%s_snapped' % projstr].x], 'y':[row['geom_origin_pt3d_%s_snapped' % projstr].y]}
         origin = gT.findClosestPoint(avaPath['x'], avaPath['y'], oPoint)
